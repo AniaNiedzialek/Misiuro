@@ -30,17 +30,6 @@ def get_env_bool(name, default=False):
     v = os.getenv(name, str(default)).strip().lower()
     return v in ("1", "true", "yes", "y")
 
-# def login(page):
-#     page.goto(BASE, wait_until="domcontentloaded")
-    
-#     page.get_by_role("link", name=re.compile("Zaloguj", re.I)).click()
-#     page.wait_for_load_state("domcontentloaded")
-#     page.get_by_label(re.compile("E-mail|Email", re.I)).fill(os.environ["MISIURI_EMAIL"])
-#     page.get_by_label(re.compile("Hasło", re.I)).fill(os.environ["MISIURI_PASSWORD"])
-#     page.get_by_role("button", name=re.compile("Zaloguj", re.I)).click()
-#     page.wait_for_load_state("newtworkidle")
-    
-
 def login(page):
     page.goto(BASE, wait_until="domcontentloaded")
     # klik "Zaloguj się" po tekście zamiast roli+name
@@ -130,19 +119,6 @@ def add_to_cart(page):
             continue
     return False
 
-
-# def go_to_cart_or_checkout(page):
-#     # spróbuj kliknąć "do kasy" / "koszyk", albo wprost wejść w /koszyk
-#     try:
-#         page.get_by_role("link", name=re.compile("do kasy|koszyk", re.I)).click(timeout=2000)
-#     except:
-#         page.goto(f"{BASE}/koszyk", wait_until="domcontentloaded")
-#     # "Zamawiam" / "Przejdź do kasy"
-#     try:
-#         page.get_by_role("button", name=re.compile("Zamawiam|Przejdź do kasy", re.I)).click(timeout=2000)
-#     except:
-#         pass
-
 def go_to_cart_or_checkout(page):
     # do koszyka/do kasy po tekście
     try:
@@ -176,41 +152,6 @@ def fill_address_if_needed(page):
     fill(re.compile("Kod pocztowy", re.I), os.getenv("POSTCODE"))
     fill(re.compile("Miasto", re.I), os.getenv("CITY"))
     fill(re.compile("Telefon", re.I), os.getenv("PHONE"))
-
-# def choose_cod_and_submit(page, auto_place_order: bool):
-#     # wybierz "Za pobraniem"
-#     try:
-#         # radio po etykiecie
-#         pay_cod = page.get_by_label(re.compile("Za pobraniem", re.I))
-#         if pay_cod.count() > 0:
-#             pay_cod.first.check()
-#         else:
-#             page.locator("label", has_text=re.compile("Za pobraniem", re.I)).first.click()
-#     except:
-#         pass
-
-#     # zgody/regulamin (jeśli jest)
-#     try:
-#         page.get_by_label(re.compile("akceptuj|regulamin|zgodę", re.I)).check()
-#     except:
-#         pass
-
-#     if auto_place_order:
-#         # złóż zamówienie
-#         for locator in [
-#             page.get_by_role("button", name=re.compile("Zamawiam|Złóż zamówienie|Potwierdzam", re.I)),
-#             page.locator("button:has-text('Zamawiam')"),
-#             page.locator("button:has-text('Złóż zamówienie')")
-#         ]:
-#             try:
-#                 locator.first.click(timeout=1500)
-#                 break
-#             except:
-#                 continue
-#         page.wait_for_load_state("networkidle", timeout=10000)
-#         return "submitted"
-#     else:
-#         return "paused_at_checkout"
 
 def choose_cod_and_submit(page, auto_place_order: bool):
     # "Za pobraniem" – po etykiecie/tekście
@@ -310,45 +251,6 @@ def try_buy_first_new(pw, headless: bool, auto_place_order: bool):
             pass
         browser.close()
     return True
-
-
-# def process_once(page, auto_place_order: bool):
-#     seen = load_seen()
-#     links = collect_product_links_on_category(page)
-
-#     if not links:
-#         print("Brak produktów w tej kategorii – odświeżę za chwilę.")
-#         return
-
-#     # ➜ NA CZAS TESTU: potraktuj wszystko jako nowe
-#     # new_links = [u for u in links if u not in seen]
-#     new_links = links
-
-#     if not new_links:
-#         print("Brak nowych pozycji – odświeżę za chwilę.")
-#         return
-
-#     target = new_links[0]
-#     print(f"Cel: {target}")
-
-#     page.goto(target, wait_until="domcontentloaded")
-
-#     if not add_to_cart(page):
-#         print("Nie znalazłam przycisku 'Do koszyka' – spróbuję ponownie po odświeżeniu.")
-#         return
-
-#     go_to_cart_or_checkout(page)
-#     fill_address_if_needed(page)
-#     result = choose_cod_and_submit(page, auto_place_order)
-
-#     # Zapisz jako widziane (żeby później działał normalny tryb)
-#     seen.add(target)
-#     save_seen(seen)
-
-#     if result == "submitted":
-#         print("Zamówienie złożone (AUTO_PLACE_ORDER=true).")
-#     else:
-#         print("Zatrzymano na podsumowaniu – kliknij 'Zamawiam' ręcznie (AUTO_PLACE_ORDER=false).")
 
 def process_once(page, auto_place_order: bool):
     seen = load_seen()
