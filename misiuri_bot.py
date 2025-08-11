@@ -8,6 +8,8 @@ BASE = "https://misiuri.com"
 # CATEGORY_URL="https://misiuri.com/pl/c/Kubki/16"
 CATEGORY_URL = "https://misiuri.com/pl/c/Broszki/13"
 SEEN_FILE = Path("seen.json")
+MAX_ITEMS_PER_RUN = int(os.getenv("MAX_ITEMS_PER_RUN", "3"))  # ile broszek kupować maksymalnie w jednym uruchomieniu
+
 
 def accept_cookies_if_any(page):
     try:
@@ -119,8 +121,45 @@ def add_to_cart(page):
             continue
     return False
 
-def go_to_cart_or_checkout(page):
-    # do koszyka/do kasy po tekście
+def choose_payment_and_submit_cart(page):
+    # Dostawa – jeśli coś trzeba zaznaczyć, wybierz pierwszy widoczny wariant
+    try:
+        page.locator("label:has-text('Kurier')").first.click(timeout=1500)
+    except:
+        pass
+
+    # Płatność: "przelew Bank ING"
+    # Szukamy po etykiecie, potem po tekście
+    chose = False
+    try:
+        page.get_by_label(re.compile("przelew Bank ING", re.I)).first.check()
+        chose = True
+    except:
+        try:
+            page.locator("label:has-text('przelew Bank ING')").first.click(timeout=1500)
+            chose = True
+        except:
+            pass
+
+    if not chose:
+        print("[INFO] Nie znalazłam płatności 'przelew Bank ING' – zostawiam domyślną.")
+
+    # Przejdź dalej z koszyka
+    for sel in ["button:has-text('Zamawiam')", "a:has-text('Zamawiam')"]:
+        try:
+            page.locator(sel).first.click(timeout=2000)
+            return
+        except:
+            continue
+    # awaryjnie
+    try:
+        page.goto(f"{BASE}/order", wait_until="domcontentloaded")
+    except:
+        pass
+
+
+def go_to_cart_then_checkout(page):
+    # Jeśli jesteśmy w mini-koszyku – klik "do kasy" / "koszyk"
     try:
         page.locator("a:has-text('do kasy')").first.click(timeout=1500)
     except:
@@ -129,14 +168,9 @@ def go_to_cart_or_checkout(page):
         except:
             page.goto(f"{BASE}/koszyk", wait_until="domcontentloaded")
 
-    # "Zamawiam" / "Przejdź do kasy" po tekście
-    try:
-        page.locator("button:has-text('Zamawiam')").first.click(timeout=1500)
-    except:
-        try:
-            page.locator("button:has-text('Przejdź do kasy')").first.click(timeout=1500)
-        except:
-            pass
+    # Teraz strona koszyka: wybierz płatność ING i kliknij "Zamawiam"
+    choose_payment_and_submit_cart(page)
+
 
 
 def fill_address_if_needed(page):
@@ -252,45 +286,61 @@ def try_buy_first_new(pw, headless: bool, auto_place_order: bool):
         browser.close()
     return True
 
-def process_once(page, auto_place_order: bool):
+def process_multiple(page, auto_place_order: bool):
     seen = load_seen()
     links = collect_product_links_on_category(page)
     if not links:
         print("Brak produktów w tej kategorii – odświeżę za chwilę.")
-        return
+        return 0
 
-    # TEST: traktuj wszystko jako nowe
-    # new_links = [u for u in links if u not in seen]
-    new_links = links
+    # tylko nowości
+    new_links = [u for u in links if u not in seen]
 
-    # znajdź pierwszy produkt, który da się dodać do koszyka
-    target = find_first_available_product(page, new_links)
-    if not target:
-        print("Nie znalazłam dostępnego produktu (większość może być wyprzedana). Odświeżę za chwilę.")
-        return
+    bought = 0
+    for url in new_links:
+        if bought >= MAX_ITEMS_PER_RUN:
+            break
 
-    print(f"Cel: {target}")
-    # Jesteśmy już na stronie produktu (find_first_available_product zrobił goto)
-    # spróbuj dodać do koszyka
-    if not add_to_cart(page):
-        print("Przycisk był widoczny, ale klik się nie powiódł – spróbuję przy następnym odświeżeniu.")
-        return
+        # wejdź i sprawdź dostępność
+        try:
+            page.goto(url, wait_until="domcontentloaded")
+        except Exception:
+            continue
 
-    # przejście do koszyka/kasy
-    go_to_cart_or_checkout(page)
+        if not has_add_to_cart_button(page):
+            continue
 
-    # wypełnienie adresu (jeśli potrzebne) i wybór 'Za pobraniem'
-    fill_address_if_needed(page)
-    result = choose_cod_and_submit(page, auto_place_order)
+        print(f"[KUPNO] Próbuję: {url}")
 
-    # zapisz ten produkt jako widziany (żeby tryb normalny omijał go później)
-    seen.add(target)
-    save_seen(seen)
+        if not add_to_cart(page):
+            print("[INFO] Klik 'Dodaj do koszyka' się nie udał – następny.")
+            continue
 
-    if result == "submitted":
-        print("Zamówienie złożone (AUTO_PLACE_ORDER=true).")
-    else:
-        print("Zatrzymano na podsumowaniu – kliknij 'Zamawiam' ręcznie (AUTO_PLACE_ORDER=false).")
+        # koszyk → wybór ING → dalej
+        go_to_cart_then_checkout(page)
+
+        # dane + regulamin + CAPTCHA (pauza) → Podsumowanie → Zamawiam
+        result = accept_terms_and_wait_for_captcha_then_continue(page)
+
+        # zapisz i zlicz
+        seen.add(url)
+        save_seen(seen)
+
+        if result == "submitted":
+            bought += 1
+            print("[OK] Zamówienie złożone.")
+        else:
+            print("[INFO] Zatrzymano bez finalizacji.")
+            # jeśli przerwałaś ręcznie – wyjdź z pętli
+            break
+
+        # po zamówieniu wróć do kategorii, żeby brać kolejne
+        try:
+            page.goto(CATEGORY_URL, wait_until="domcontentloaded")
+        except:
+            pass
+
+    return bought
 
 
 def has_add_to_cart_button(page) -> bool:
@@ -345,6 +395,85 @@ def find_first_available_product(page, links):
             return url
     return None
 
+def accept_terms_and_wait_for_captcha_then_continue(page):
+    # Zaznacz regulamin
+    check_terms(page)
+
+    try:
+        page.get_by_label(re.compile("Zapozna[ł|łem]em się z regulaminem", re.I)).check(timeout=1500)
+    except:
+        try:
+            page.locator("label:has-text('regulaminem')").first.click(timeout=1500)
+        except:
+            pass
+
+    # Uzupełnij brakujące pola, jeśli nie wypełniło się z konta
+    fill_address_if_needed(page)
+
+    # --- CAPTCHA ---
+    # Nie mogę uczyć obchodzenia reCAPTCHA. Zróbmy bezpieczną pauzę i czekajmy,
+    # aż ją zaznaczysz (checkbox stanie się "zaznaczony"), wtedy idziemy dalej.
+    print("[AKCJA] Zaznacz proszę CAPTCHA 'I'm not a robot'. Skrypt czeka, aż zniknie blokada...")
+
+    # Heurystyka: czekamy aż przycisk 'Podsumowanie' stanie się aktywny/klikalny
+    # (po captcha często znika blokada/disabled)
+    try:
+        page.wait_for_function(
+            """() => {
+                const btn = [...document.querySelectorAll('button, a')].find(b => /Podsumowanie/i.test(b.innerText));
+                if (!btn) return false;
+                return !btn.hasAttribute('disabled') && getComputedStyle(btn).pointerEvents !== 'none';
+            }""",
+            timeout=120000  # 2 minuty na ręczne odkliknięcie
+        )
+    except:
+        print("[INFO] Nie widzę aktywnego przycisku 'Podsumowanie' – spróbuję kliknąć mimo wszystko.")
+    
+    # Kliknij "Podsumowanie"
+    for sel in ["button:has-text('Podsumowanie')", "a:has-text('Podsumowanie')"]:
+        try:
+            page.locator(sel).first.click(timeout=2000)
+            break
+        except:
+            continue
+
+    # Ostatnia strona – złóż zamówienie
+    for sel in ["button:has-text('Zamawiam')",
+                "button:has-text('Złóż zamówienie')",
+                "button:has-text('Potwierdzam')"]:
+        try:
+            page.locator(sel).first.click(timeout=2500)
+            page.wait_for_load_state("networkidle", timeout=10000)
+            return "submitted"
+        except:
+            continue
+    return "paused"
+
+def check_terms(page):
+    # 1) Spróbuj po labelce z tekstem
+    try:
+        page.locator("label:has-text('regulaminem')").first.click(timeout=1200)
+        return
+    except: 
+        pass
+    # 2) Jeżeli label nie działa, znajdź input typu checkbox w tej sekcji
+    try:
+        box = page.locator("input[type='checkbox']").filter(
+            has=page.locator("xpath=ancestor::*/descendant::*[contains(., 'regulamin')]")
+        ).first
+        if box.count():
+            # jeśli jest niewidoczny pod labelką – kliknij label powiązany przez 'for'
+            try:
+                fid = box.get_attribute("id")
+                if fid:
+                    page.locator(f"label[for='{fid}']").first.click(timeout=800)
+                    return
+            except:
+                pass
+            # awaryjnie kliknij sam input (JS)
+            page.evaluate("(el)=>el.click()", box)
+    except:
+        pass
 
 if __name__ == "__main__":
     load_dotenv()
@@ -368,22 +497,18 @@ if __name__ == "__main__":
 
         while True:
             try:
-                process_once(page, auto_place_order)
+                n = process_multiple(page, auto_place_order=True)  # skoro to tryb „kupuj”, ustaw True
+                if n > 0:
+                    print(f"[INFO] Złożono {n} zamówień w tej turze.")
             except Exception as e:
                 print("Błąd w pętli:", e)
 
-            # Zamiast zamykać – po prostu odświeżamy kategorię i czekamy
-            # try:
-            #     page.goto(CATEGORY_URL, wait_until="domcontentloaded")
-            # except Exception:
-            #     pass
-            # time.sleep(poll_seconds)
-            # na końcu pętli
+            # po serii zakupów – odśwież i czekaj
             try:
                 page.goto(CATEGORY_URL, wait_until="domcontentloaded")
-            except Exception:
-                try:
-                    page.reload(wait_until="domcontentloaded")
-                except:
-                    pass
+            except:
+                try: page.reload(wait_until="domcontentloaded")
+                except: pass
+
             time.sleep(poll_seconds)
+
