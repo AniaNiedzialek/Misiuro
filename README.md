@@ -15,8 +15,7 @@ dodawania dostępnych produktów do koszyka oraz (opcjonalnie) składania zamów
 
 ### 1. Sklonuj repozytorium
 ```bash
-git clone <adres_repozytorium>
-cd <nazwa_katalogu>
+git clone https://github.com/AniaNiedzialek/Misiuro
 ```
 
 ### 2. Utwórz i aktywuj wirtualne środowisko
@@ -61,7 +60,7 @@ POLL_SECONDS=10
 
 ### 5. Uruchom skrypt
 ```bash
-python misiuri_bot.py
+python3 misiuri_bot.py
 ```
 
 ## Jak działa skrypt
